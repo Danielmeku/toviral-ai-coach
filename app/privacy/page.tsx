@@ -8,18 +8,18 @@ export default function PrivacyPage() {
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-96 bg-blue-600/10 blur-[120px] pointer-events-none rounded-full" />
 
       {/* Navigation Header */}
-      <header className="relative z-10 max-w-5xl w-full mx-auto px-6 py-1 flex items-center justify-between border-b border-white/10">
-        <Link href="/" className="flex items-center gap-3 font-bold text-white">
+      <header className="relative z-10 max-w-5xl w-full mx-auto px-6 py-2 flex items-center justify-between border-b border-white/10">
+        <Link href="/dashboard" className="flex items-center gap-3 font-bold text-white">
           <Image
             src="/logo.png"
             alt="ToViral AI Logo"
-            width={200}
-            height={160}
-            className="rounded-lg object-contain"
+            width={140}
+            height={40}
+            className="h-10 w-auto object-contain"
           />
         </Link>
         <Link
-          href="/login"
+          href="/dashboard"
           className="text-xs font-semibold px-4 py-2 rounded-full border border-white/20 text-white hover:bg-white hover:text-black transition-all duration-200"
         >
           Back
@@ -94,7 +94,7 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-6 space-y-2 text-gray-400">
               <li><strong className="text-white">In-App Disconnection:</strong> You can revoke access at any time directly through your TikTok account settings (<em className="text-gray-300">Settings and Privacy &gt; Security &gt; Authorized Apps</em>) or within our application settings.</li>
-              <li><strong className="text-white">Data Deletion Request:</strong> You retain complete control over your data. You can permanently delete your ToViral AI account, disconnect your TikTok profile, and erase all associated metrics and access tokens at any time by navigating to your <strong className="text-white">Account Settings</strong> inside the dashboard and clicking <strong className="text-white">"Delete Account & Data"</strong></strong>.</li>
+              <li><strong className="text-white">Data Deletion Request:</strong> You retain complete control over your data. You can permanently delete your ToViral AI account, disconnect your TikTok profile, and erase all associated metrics and access tokens at any time by navigating to your <strong className="text-white">Account Settings</strong> inside the dashboard and clicking <strong className="text-white">"Delete Account & Data"</strong>.</li>
               <li><strong className="text-white">Automatic Deletion:</strong> Upon receiving a revocation event or a valid deletion request, all personal data and access tokens associated with your TikTok account will be permanently erased from our primary databases within 30 days.</li>
             </ul>
           </section>
