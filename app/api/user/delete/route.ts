@@ -7,7 +7,7 @@ export async function DELETE() {
   try {
     const cookieStore = cookies();
 
-    // 1. Authenticate the requesting user via SSR client
+    // 1. Authenticate user
     const supabaseSSR = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -22,7 +22,7 @@ export async function DELETE() {
                 cookieStore.set(name, value, options)
               );
             } catch {
-              // Called from a Server Component
+              // Called from Server Component
             }
           },
         },
@@ -38,35 +38,49 @@ export async function DELETE() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 2. Delete user data from application tables
-    const { error: dbError } = await supabaseSSR
-      .from('connected_accounts')
-      .delete()
-      .eq('user_id', user.id);
-
-    if (dbError) {
-      console.error('Failed to delete database records:', dbError.message);
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceRoleKey) {
+      console.error('SUPABASE_SERVICE_ROLE_KEY is not defined in environment variables');
+      return NextResponse.json(
+        { error: 'Server configuration error: Missing admin key' },
+        { status: 500 }
+      );
     }
 
-    // 3. Initialize Admin Client to permanently delete the Auth account
+    // 2. Initialize Admin Client
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      serviceRoleKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
     );
 
+    // 3. Delete user data from all custom application tables first
+    await supabaseAdmin.from('connected_accounts').delete().eq('user_id', user.id);
+    // Add any other user tables if you have them (e.g. profiles, analytics_cache, etc.)
+    // await supabaseAdmin.from('profiles').delete().eq('id', user.id);
+
+    // 4. Delete user permanently from Supabase Auth
     const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(user.id);
 
     if (authDeleteError) {
-      console.error('Failed to delete user from Supabase Auth:', authDeleteError.message);
-      return NextResponse.json({ error: 'Failed to delete user account' }, { status: 500 });
+      console.error('Supabase Auth Admin Delete Error:', authDeleteError.message);
+      return NextResponse.json(
+        { error: `Auth deletion failed: ${authDeleteError.message}` },
+        { status: 500 }
+      );
     }
 
-    // 4. Sign out the session
+    // 5. Sign out session
     await supabaseSSR.auth.signOut();
 
     return NextResponse.json({ success: true }, { status: 200 });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Server error during account deletion:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
   }
 }
