@@ -27,79 +27,48 @@ export async function fetchTikTokStats(handle: string): Promise<TikTokVideoMetri
     'x-rapidapi-host': host,
   };
 
-  // STEP 1: Search user to fetch profile data
-  const userUrl = `https://${host}/user/search?keywords=${encodeURIComponent(cleanHandle)}&count=10&cursor=0`;
-  const userRes = await fetch(userUrl, { method: 'GET', headers, next: { revalidate: 3600 } });
+  // 1. Fetch user post feed/videos list directly
+  const postsUrl = `https://${host}/user/posts?unique_id=${encodeURIComponent(cleanHandle)}&count=30&cursor=0`;
+  let postsRes = await fetch(postsUrl, { method: 'GET', headers, next: { revalidate: 3600 } });
 
-  if (!userRes.ok) {
-    const errorText = await userRes.text();
-    throw new Error(`User lookup failed (${userRes.status}): ${errorText || userRes.statusText}`);
+  // Fallback to secondary endpoint structure if first endpoint fails
+  if (!postsRes.ok) {
+    const searchUrl = `https://${host}/user/search?keywords=${encodeURIComponent(cleanHandle)}&count=10`;
+    postsRes = await fetch(searchUrl, { method: 'GET', headers, next: { revalidate: 3600 } });
   }
 
-  const resData = await userRes.json();
+  if (!postsRes.ok) {
+    const errorText = await postsRes.text();
+    throw new Error(`Data fetch failed (${postsRes.status}): ${errorText || postsRes.statusText}`);
+  }
 
-  // Inspect various common payload keys returned by RapidAPI TikTok scrapers
-  const rawList =
-    resData?.user_list ||
-    resData?.data?.user_list ||
-    resData?.data?.users ||
-    resData?.users ||
+  const resData = await postsRes.json();
+
+  // Extract array of individual videos
+  const rawPosts =
+    resData?.data?.videos ||
+    resData?.data?.itemList ||
+    resData?.videos ||
+    resData?.itemList ||
     resData?.data ||
     (Array.isArray(resData) ? resData : []);
 
-  const matchedItem = Array.isArray(rawList) ? rawList[0] : rawList;
-
-  // Extract nested user info object or fallback to item root
-  const userObj =
-    matchedItem?.user_info ||
-    matchedItem?.userInfo ||
-    matchedItem?.user ||
-    matchedItem ||
-    null;
-
-  if (!userObj || Object.keys(userObj).length === 0) {
-    throw new Error(`Could not locate user profile details for "${cleanHandle}"`);
+  if (!Array.isArray(rawPosts) || rawPosts.length === 0) {
+    throw new Error(`No videos found for user "${cleanHandle}"`);
   }
 
-  // Extract statistics safely with fallbacks
-  const playCount = Number(
-    userObj.total_favorited ||
-    userObj.follower_count ||
-    userObj.followers ||
-    userObj.stats?.followerCount ||
-    0
-  );
+  // 2. Map every video post to its metrics array
+  return rawPosts.map((item: any, index: number) => {
+    const stats = item.statistics || item.stats || item;
 
-  const diggCount = Number(
-    userObj.total_favorited ||
-    userObj.likes ||
-    userObj.stats?.heartCount ||
-    0
-  );
-
-  const commentCount = Number(
-    userObj.aweme_count ||
-    userObj.video_count ||
-    userObj.stats?.videoCount ||
-    0
-  );
-
-  const shareCount = Number(
-    userObj.follower_count ||
-    userObj.following_count ||
-    0
-  );
-
-  // Return formatted array matching TikTokVideoMetric
-  return [
-    {
-      id: String(userObj.uid || userObj.id || userObj.secUid || '1'),
-      title: `${userObj.nickname || userObj.unique_id || cleanHandle}'s Profile Analytics`,
-      playCount,
-      diggCount,
-      commentCount,
-      shareCount,
-      createdTime: Number(userObj.create_time || Math.floor(Date.now() / 1000)),
-    },
-  ];
+    return {
+      id: String(item.id || item.video_id || item.aweme_id || index + 1),
+      title: item.title || item.desc || item.share_info?.share_desc || `Video ${index + 1}`,
+      playCount: Number(stats.play_count || stats.playCount || stats.views || 0),
+      diggCount: Number(stats.digg_count || stats.diggCount || stats.likes || 0),
+      commentCount: Number(stats.comment_count || stats.commentCount || stats.comments || 0),
+      shareCount: Number(stats.share_count || stats.shareCount || stats.shares || 0),
+      createdTime: Number(item.create_time || item.createTime || Math.floor(Date.now() / 1000)),
+    };
+  });
 }
