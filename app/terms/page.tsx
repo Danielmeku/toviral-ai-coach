@@ -92,7 +92,6 @@ export default function TermsPage() {
             <ul className="list-disc pl-6 space-y-2 text-gray-400">
               <li><strong className="text-white">API Availability:</strong> ToViral AI relies on third-party APIs (including TikTok) to deliver certain features. We are not responsible for service interruptions, API rate limits, feature deprecations, or outages caused directly by third-party providers.</li>
               <li><strong className="text-white">Changes to Features:</strong> We reserve the right to modify, suspend, or discontinue any TikTok-related features or API endpoints at any time without prior notice if required by updates to TikTok’s Developer Policies.</li>
-              <li><strong className="text-white">Disclaimer:</strong> All services and data insights are provided on an <strong className="text-white font-mono text-xs">"AS IS"</strong> and <strong className="text-white font-mono text-xs">"AS AVAILABLE"</strong> basis without warranties of any kind, either express or implied.</li>
             </ul>
           </section>
 
