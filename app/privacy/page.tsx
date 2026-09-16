@@ -8,7 +8,7 @@ export default function PrivacyPage() {
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-96 bg-blue-600/10 blur-[120px] pointer-events-none rounded-full" />
 
       {/* Navigation Header */}
-      <header className="relative z-10 max-w-5xl w-full mx-auto px-6 py-2 flex items-center justify-between border-b border-white/10">
+      <header className="relative z-10 max-w-5xl w-full mx-auto px-6 py-1 flex items-center justify-between border-b border-white/10">
         <Link href="/" className="flex items-center gap-3 font-bold text-white">
           <Image
             src="/logo.png"
