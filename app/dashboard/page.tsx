@@ -185,9 +185,9 @@ export default function DashboardPage() {
 
       {/* Danger Zone: Account & Data Deletion */}
       <div className="mt-12 pt-6 border-t border-red-500/20 bg-red-950/10 rounded-xl p-5 space-y-3">
-        <h3 className="text-base font-bold text-red-500">Danger Zone</h3>
+        <h3 className="text-base font-bold text-red-500">Please Read First!</h3>
         <p className="text-xs text-gray-400 leading-relaxed">
-          Disconnect your TikTok integration, revoke OAuth tokens, and permanently delete all your stored analytics data from ToViral AI.
+          Disconnect your TikTok integration, ToViral AI password and permanently delete all your stored analytics data from ToViral AI.
         </p>
         <button
           onClick={handleDeleteAccount}
