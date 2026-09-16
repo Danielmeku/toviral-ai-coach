@@ -27,7 +27,7 @@ export async function fetchTikTokStats(handle: string): Promise<TikTokVideoMetri
     'x-rapidapi-host': host,
   };
 
-  // STEP 1: Search user to get profile data matching tikwm/tiktok-scraper7 schema
+  // STEP 1: Search user to fetch profile data
   const userUrl = `https://${host}/user/search?keywords=${encodeURIComponent(cleanHandle)}&count=10&cursor=0`;
   const userRes = await fetch(userUrl, { method: 'GET', headers, next: { revalidate: 3600 } });
 
@@ -36,24 +36,70 @@ export async function fetchTikTokStats(handle: string): Promise<TikTokVideoMetri
     throw new Error(`User lookup failed (${userRes.status}): ${errorText || userRes.statusText}`);
   }
 
-  const userData = await userRes.json();
-  const userList = userData?.user_list || userData?.data || [];
-  const matchedUser = userList[0]?.user_info || userList[0]?.user || userList[0];
+  const resData = await userRes.json();
 
-  if (!matchedUser) {
+  // Inspect various common payload keys returned by RapidAPI TikTok scrapers
+  const rawList =
+    resData?.user_list ||
+    resData?.data?.user_list ||
+    resData?.data?.users ||
+    resData?.users ||
+    resData?.data ||
+    (Array.isArray(resData) ? resData : []);
+
+  const matchedItem = Array.isArray(rawList) ? rawList[0] : rawList;
+
+  // Extract nested user info object or fallback to item root
+  const userObj =
+    matchedItem?.user_info ||
+    matchedItem?.userInfo ||
+    matchedItem?.user ||
+    matchedItem ||
+    null;
+
+  if (!userObj || Object.keys(userObj).length === 0) {
     throw new Error(`Could not locate user profile details for "${cleanHandle}"`);
   }
 
-  // STEP 2: Format extracted profile metrics into the existing TikTokVideoMetric signature
+  // Extract statistics safely with fallbacks
+  const playCount = Number(
+    userObj.total_favorited ||
+    userObj.follower_count ||
+    userObj.followers ||
+    userObj.stats?.followerCount ||
+    0
+  );
+
+  const diggCount = Number(
+    userObj.total_favorited ||
+    userObj.likes ||
+    userObj.stats?.heartCount ||
+    0
+  );
+
+  const commentCount = Number(
+    userObj.aweme_count ||
+    userObj.video_count ||
+    userObj.stats?.videoCount ||
+    0
+  );
+
+  const shareCount = Number(
+    userObj.follower_count ||
+    userObj.following_count ||
+    0
+  );
+
+  // Return formatted array matching TikTokVideoMetric
   return [
     {
-      id: String(matchedUser.uid || matchedUser.id || '1'),
-      title: `${matchedUser.nickname || cleanHandle}'s Profile Overview`,
-      playCount: Number(matchedUser.total_favorited || matchedUser.follower_count || 0),
-      diggCount: Number(matchedUser.total_favorited || 0),
-      commentCount: Number(matchedUser.aweme_count || 0),
-      shareCount: Number(matchedUser.follower_count || 0),
-      createdTime: Number(matchedUser.create_time || Date.now() / 1000),
+      id: String(userObj.uid || userObj.id || userObj.secUid || '1'),
+      title: `${userObj.nickname || userObj.unique_id || cleanHandle}'s Profile Analytics`,
+      playCount,
+      diggCount,
+      commentCount,
+      shareCount,
+      createdTime: Number(userObj.create_time || Math.floor(Date.now() / 1000)),
     },
   ];
 }
