@@ -7,7 +7,7 @@ export async function DELETE() {
   try {
     const cookieStore = cookies();
 
-    // 1. Authenticate user
+    // 1. Authenticate user via SSR client
     const supabaseSSR = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -40,9 +40,8 @@ export async function DELETE() {
 
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
-      console.error('SUPABASE_SERVICE_ROLE_KEY is not defined in environment variables');
       return NextResponse.json(
-        { error: 'Server configuration error: Missing admin key' },
+        { error: 'Missing SUPABASE_SERVICE_ROLE_KEY' },
         { status: 500 }
       );
     }
@@ -59,10 +58,15 @@ export async function DELETE() {
       }
     );
 
-    // 3. Delete user data from all custom application tables first
-    await supabaseAdmin.from('connected_accounts').delete().eq('user_id', user.id);
-    // Add any other user tables if you have them (e.g. profiles, analytics_cache, etc.)
-    // await supabaseAdmin.from('profiles').delete().eq('id', user.id);
+    // 3. Delete profile record manually first
+    const { error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .delete()
+      .eq('id', user.id);
+
+    if (profileError) {
+      console.error('Failed to delete profile record:', profileError.message);
+    }
 
     // 4. Delete user permanently from Supabase Auth
     const { error: authDeleteError } = await supabaseAdmin.auth.admin.deleteUser(user.id);
@@ -75,7 +79,7 @@ export async function DELETE() {
       );
     }
 
-    // 5. Sign out session
+    // 5. Sign out current session
     await supabaseSSR.auth.signOut();
 
     return NextResponse.json({ success: true }, { status: 200 });
