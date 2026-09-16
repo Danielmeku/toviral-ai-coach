@@ -1,16 +1,19 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import AnalyticsView from "@/components/AnalyticsView";
 import TikTokCoachChat from "@/components/AiCoachChat";
 import TermsModal from "@/components/TermsModal";
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<"videos" | "analytics" | "coach">("analytics");
   const [videos, setVideos] = useState<any[]>([]);
   const [handle, setHandle] = useState("");
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [showTermsModal, setShowTermsModal] = useState(false);
 
@@ -67,6 +70,34 @@ export default function DashboardPage() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete your account? This will permanently erase all your saved TikTok data, metrics, and tokens from our database. This action cannot be undone."
+    );
+
+    if (!confirmed) return;
+
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/user/delete", {
+        method: "DELETE",
+      });
+
+      if (res.ok) {
+        router.push("/");
+        router.refresh();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to delete account. Please try again.");
+        setDeleting(false);
+      }
+    } catch (err) {
+      console.error("Account deletion failed:", err);
+      alert("An unexpected error occurred while deleting your account.");
+      setDeleting(false);
     }
   };
 
@@ -151,6 +182,21 @@ export default function DashboardPage() {
           <TikTokCoachChat userAnalytics={{ handle, videoCount: videos.length, videos }} />
         </div>
       )}
+
+      {/* Danger Zone: Account & Data Deletion */}
+      <div className="mt-12 pt-6 border-t border-red-500/20 bg-red-950/10 rounded-xl p-5 space-y-3">
+        <h3 className="text-base font-bold text-red-500">Danger Zone</h3>
+        <p className="text-xs text-gray-400 leading-relaxed">
+          Disconnect your TikTok integration, revoke OAuth tokens, and permanently delete all your stored analytics data from ToViral AI.
+        </p>
+        <button
+          onClick={handleDeleteAccount}
+          disabled={deleting}
+          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold text-xs rounded-xl transition disabled:opacity-50"
+        >
+          {deleting ? "Deleting Data..." : "Delete Account & All Data"}
+        </button>
+      </div>
     </div>
   );
 }
