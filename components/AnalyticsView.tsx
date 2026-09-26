@@ -298,8 +298,8 @@ export default function AnalyticsView({
 
       {/* Chart */}
       <div
-        className="w-full min-h-[360px]"
-        style={{ height: 360 }}
+        className="w-full min-h-[420px]"
+        style={{ height: 420 }}
       >
         {filteredVideos.length === 0 ? (
 
@@ -353,7 +353,22 @@ export default function AnalyticsView({
                   fontSize={12}
                 />
 
-                <Tooltip />
+                <Tooltip 
+                  contentStyle={{
+                    backgroundColor: "#1F2937",
+                    borderColor: "#374151",
+                    borderRadius: "8px",
+                    color: "#FFFFFF",
+                  }}
+                  labelStyle={{
+                    color: "#F9FAFB",
+                    fontWeight: "600",
+                    marginBottom: "6px",
+                  }}
+                  itemStyle={{
+                    fontWeight: "500",
+                  }}
+                />
 
                 <Legend />
 
@@ -393,10 +408,10 @@ export default function AnalyticsView({
               <BarChart
                 data={filteredVideos}
                 margin={{
-                  top: 10,
+                  top: 30,
                   right: 20,
                   left: 10,
-                  bottom: 60,
+                  bottom: 80,
                 }}
               >
                 <CartesianGrid
@@ -421,9 +436,28 @@ export default function AnalyticsView({
                   fontSize={12}
                 />
 
-                <Tooltip />
+                <Tooltip 
+                  contentStyle={{
+                    backgroundColor: "#1F2937",
+                    borderColor: "#374151",
+                    borderRadius: "8px",
+                    color: "#FFFFFF",
+                  }}
+                  labelStyle={{
+                    color: "#F9FAFB",
+                    fontWeight: "600",
+                    marginBottom: "6px",
+                  }}
+                  itemStyle={{
+                    fontWeight: "500",
+                  }}
+                />
 
-                <Legend />
+                <Legend 
+                  verticalAlign="top" 
+                  align="center"
+                  wrapperStyle={{ paddingBottom: "15px" }}
+                />
 
                 <Bar
                   dataKey="views"
@@ -471,7 +505,22 @@ export default function AnalyticsView({
                   ))}
                 </Pie>
 
-                <Tooltip />
+                <Tooltip 
+                  contentStyle={{
+                    backgroundColor: "#1F2937",
+                    borderColor: "#374151",
+                    borderRadius: "8px",
+                    color: "#FFFFFF",
+                  }}
+                  labelStyle={{
+                    color: "#F9FAFB",
+                    fontWeight: "600",
+                    marginBottom: "6px",
+                  }}
+                  itemStyle={{
+                    fontWeight: "500",
+                  }}
+                />
 
                 <Legend />
               </PieChart>
