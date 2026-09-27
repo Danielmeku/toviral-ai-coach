@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import AnalyticsView from "@/components/AnalyticsView";
@@ -22,25 +22,40 @@ export default function DashboardPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  const fetchTikTokData = async (e?: React.FormEvent) => {
+  const fetchTikTokData = useCallback(async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
     setLoading(true);
     setError("");
 
     try {
-      // Get the current session to extract the TikTok access token
-      const { data: { session } } = await supabase.auth.getSession();
-      const providerToken = session?.provider_token;
+      // 1. Get authenticated user
+      const { data: { user } } = await supabase.auth.getUser();
 
-      if (!providerToken) {
+      if (!user) {
+        throw new Error("User not authenticated. Please log in.");
+      }
+
+      // 2. Fetch the stored TikTok token from the profiles table
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("tiktok_access_token, tiktok_handle")
+        .eq("id", user.id)
+        .single();
+
+      if (profileError || !profile?.tiktok_access_token) {
         throw new Error("No TikTok access token found. Please sign in with TikTok.");
       }
 
+      if (profile.tiktok_handle) {
+        setHandle(profile.tiktok_handle);
+      }
+
+      // 3. Request metrics using stored access token
       const res = await fetch("/api/tiktok/fetch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ access_token: providerToken }),
+        body: JSON.stringify({ access_token: profile.tiktok_access_token }),
       });
 
       const data = await res.json();
@@ -55,7 +70,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [supabase]);
 
   useEffect(() => {
     async function checkTermsAndFetch() {
@@ -63,11 +78,11 @@ export default function DashboardPage() {
       if (user && !user.user_metadata?.has_accepted_terms) {
         setShowTermsModal(true);
       }
-      // Automatically load metrics for the authenticated account
+      // Load metrics for account
       fetchTikTokData();
     }
     checkTermsAndFetch();
-  }, [supabase]);
+  }, [supabase, fetchTikTokData]);
 
   const handleAcceptTerms = async () => {
     const { error } = await supabase.auth.updateUser({
@@ -109,16 +124,6 @@ export default function DashboardPage() {
       setDeleting(false);
     }
   };
-
-  const { data: profile } = await supabase
-  .from('profiles')
-  .select('tiktok_access_token')
-  .eq('id', user.id)
-  .single();
-
-if (!profile?.tiktok_access_token) {
-  // Triggers "No TikTok access token found" banner
-}
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
