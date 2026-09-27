@@ -110,6 +110,16 @@ export default function DashboardPage() {
     }
   };
 
+  const { data: profile } = await supabase
+  .from('profiles')
+  .select('tiktok_access_token')
+  .eq('id', user.id)
+  .single();
+
+if (!profile?.tiktok_access_token) {
+  // Triggers "No TikTok access token found" banner
+}
+
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
       {/* First-Time User Terms Modal */}
