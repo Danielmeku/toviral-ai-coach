@@ -21,7 +21,7 @@ export default function OnboardingPage() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
 
-      // 1. If user is logged in, attempt to store their onboarding metadata
+      // 1. Save onboarding profile details to Supabase if logged in
       if (user) {
         const { error: profileError } = await supabase.from('profiles').upsert({
           id: user.id,
@@ -35,19 +35,8 @@ export default function OnboardingPage() {
         }
       }
 
-      // 2. Trigger TikTok OAuth Login directly
-      const { error: oauthError } = await supabase.auth.signInWithOAuth({
-        provider: 'tiktok' as any,
-        options: {
-          redirectTo: `${window.location.origin}/dashboard`,
-          scopes: 'user.info.basic,video.list',
-        },
-      })
-
-      if (oauthError) {
-        alert(`TikTok Authorization failed: ${oauthError.message}`)
-        setLoading(false)
-      }
+      // 2. Redirect to Next.js Route Handler for TikTok OAuth redirect
+      window.location.href = '/api/auth/tiktok'
     } catch (err: any) {
       alert(`Unexpected error: ${err.message}`)
       setLoading(false)
