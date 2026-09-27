@@ -21,28 +21,21 @@ export default function OnboardingPage() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
 
-      if (!user) {
-        alert("You must be logged in.")
-        setLoading(false)
-        return
+      // 1. If user is logged in, attempt to store their onboarding metadata
+      if (user) {
+        const { error: profileError } = await supabase.from('profiles').upsert({
+          id: user.id,
+          full_name: fullName,
+          tiktok_handle: handle.replace(/^@/, '').trim(),
+          niche: niche,
+        })
+
+        if (profileError) {
+          console.warn("Profile save warning:", profileError.message)
+        }
       }
 
-      // 1. Save onboarding profile metadata to database
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: user.id,
-        full_name: fullName,
-        tiktok_handle: handle.replace(/^@/, '').trim(),
-        niche: niche,
-        updated_at: new Date().toISOString(),
-      })
-
-      if (profileError) {
-        alert(`Profile save error: ${profileError.message}`)
-        setLoading(false)
-        return
-      }
-
-      // 2. Trigger TikTok OAuth Login for official API access token
+      // 2. Trigger TikTok OAuth Login directly
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'tiktok' as any,
         options: {
