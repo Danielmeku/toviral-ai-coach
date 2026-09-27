@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 
-export async function GET() {
+export async function GET(request: Request) {
   const clientKey = process.env.TIKTOK_CLIENT_KEY;
-  const redirectUri = encodeURIComponent(`${process.env.NEXT_PUBLIC_APP_URL}/api/auth/tiktok/callback`);
+  
+  // Extract host origin dynamically from request header/URL
+  const origin = new URL(request.url).origin;
+  const redirectUri = encodeURIComponent(`${origin}/api/auth/callback/tiktok`);
   const scope = 'user.info.basic,video.list';
 
   // TikTok v2 Authorization URL
