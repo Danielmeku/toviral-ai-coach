@@ -44,7 +44,7 @@ export default function OnboardingPage() {
 
       // 2. Trigger TikTok OAuth Login for official API access token
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
-        provider: 'tiktok',
+        provider: 'tiktok' as any,
         options: {
           redirectTo: `${window.location.origin}/dashboard`,
           scopes: 'user.info.basic,video.list',
