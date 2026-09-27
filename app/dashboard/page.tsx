@@ -22,41 +22,25 @@ export default function DashboardPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  useEffect(() => {
-    async function checkTerms() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user && !user.user_metadata?.has_accepted_terms) {
-        setShowTermsModal(true);
-      }
-    }
-    checkTerms();
-  }, [supabase]);
-
-  const handleAcceptTerms = async () => {
-    const { error } = await supabase.auth.updateUser({
-      data: {
-        has_accepted_terms: true,
-        accepted_terms_at: new Date().toISOString(),
-      },
-    });
-
-    if (!error) {
-      setShowTermsModal(false);
-    }
-  };
-
-  const fetchTikTokData = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!handle) return;
+  const fetchTikTokData = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
 
     setLoading(true);
     setError("");
 
     try {
+      // Get the current session to extract the TikTok access token
+      const { data: { session } } = await supabase.auth.getSession();
+      const providerToken = session?.provider_token;
+
+      if (!providerToken) {
+        throw new Error("No TikTok access token found. Please sign in with TikTok.");
+      }
+
       const res = await fetch("/api/tiktok/fetch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ handle }),
+        body: JSON.stringify({ access_token: providerToken }),
       });
 
       const data = await res.json();
@@ -70,6 +54,31 @@ export default function DashboardPage() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    async function checkTermsAndFetch() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && !user.user_metadata?.has_accepted_terms) {
+        setShowTermsModal(true);
+      }
+      // Automatically load metrics for the authenticated account
+      fetchTikTokData();
+    }
+    checkTermsAndFetch();
+  }, [supabase]);
+
+  const handleAcceptTerms = async () => {
+    const { error } = await supabase.auth.updateUser({
+      data: {
+        has_accepted_terms: true,
+        accepted_terms_at: new Date().toISOString(),
+      },
+    });
+
+    if (!error) {
+      setShowTermsModal(false);
     }
   };
 
@@ -106,23 +115,17 @@ export default function DashboardPage() {
       {/* First-Time User Terms Modal */}
       {showTermsModal && <TermsModal onAccept={handleAcceptTerms} />}
 
-      {/* Fetch Form */}
-      <form onSubmit={fetchTikTokData} className="flex gap-3 max-w-md">
-        <input
-          type="text"
-          placeholder="Enter TikTok Handle (e.g. username(no @ needed))"
-          value={handle}
-          onChange={(e) => setHandle(e.target.value)}
-          className="flex-1 px-4 py-2 border rounded-xl dark:bg-gray-800 dark:border-gray-700 text-sm focus:outline-none"
-        />
+      {/* Fetch Control */}
+      <div className="flex items-center justify-between max-w-md">
         <button
-          type="submit"
+          type="button"
+          onClick={() => fetchTikTokData()}
           disabled={loading}
           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition disabled:opacity-50"
         >
-          {loading ? "Fetching..." : "Fetch Stats"}
+          {loading ? "Refreshing..." : "Refresh Stats"}
         </button>
-      </form>
+      </div>
 
       {error && <p className="text-red-500 text-sm">{error}</p>}
 
