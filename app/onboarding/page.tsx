@@ -35,8 +35,16 @@ export default function OnboardingPage() {
         }
       }
 
-      // 2. Redirect to Next.js Route Handler for TikTok OAuth redirect
-      window.location.href = '/api/auth/tiktok'
+      // 2. Direct browser redirect to official TikTok OAuth Endpoint
+      const clientKey = process.env.NEXT_PUBLIC_TIKTOK_CLIENT_KEY || process.env.TIKTOK_CLIENT_KEY
+      const redirectUri = encodeURIComponent("https://toviral-ai.vercel.app/api/auth/callback/tiktok")
+      const scope = encodeURIComponent("user.info.basic,video.list")
+      const csrfState = Math.random().toString(36).substring(2, 15)
+
+      const tiktokAuthUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${clientKey}&response_type=code&scope=${scope}&redirect_uri=${redirectUri}&state=${csrfState}`
+
+      // Trigger full browser navigation to TikTok
+      window.location.href = tiktokAuthUrl
     } catch (err: any) {
       alert(`Unexpected error: ${err.message}`)
       setLoading(false)
