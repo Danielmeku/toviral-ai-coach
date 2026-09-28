@@ -1,87 +1,84 @@
-import { NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
 export async function GET(request: Request) {
-  const requestUrl = new URL(request.url);
-  const origin = requestUrl.origin;
+  const { searchParams, origin } = new URL(request.url);
+  const code = searchParams.get("code");
 
-  const code = requestUrl.searchParams.get('code');
   if (!code) {
-    return NextResponse.redirect(new URL('/onboarding?error=no_code_from_tiktok', origin));
+    return NextResponse.redirect(`${origin}/dashboard?error=Missing+code`);
   }
 
   try {
-    const clientKey = process.env.TIKTOK_CLIENT_KEY?.trim();
-    const clientSecret = process.env.TIKTOK_CLIENT_SECRET?.trim();
-    const redirectUri = `${origin}/api/auth/callback/tiktok`;
-
-    // 1. Exchange code for access token
-    const tokenResponse = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Cache-Control': 'no-cache',
-      },
+    // 1. Exchange authorization code for TikTok access token
+    const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_key: clientKey!,
-        client_secret: clientSecret!,
+        client_key: process.env.TIKTOK_CLIENT_KEY!,
+        client_secret: process.env.TIKTOK_CLIENT_SECRET!,
         code,
-        grant_type: 'authorization_code',
-        redirect_uri: redirectUri,
-      }).toString(),
+        grant_type: "authorization_code",
+        redirect_uri: process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URI!,
+      }),
     });
 
-    const tokenData = await tokenResponse.json();
-    const accessToken = tokenData.access_token || tokenData.data?.access_token;
-    const openId = tokenData.open_id || tokenData.data?.open_id;
+    const tokenData = await tokenRes.json();
 
-    if (accessToken) {
-      const cookieStore = cookies();
-      const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            get(name: string) {
-              return cookieStore.get(name)?.value;
-            },
-            set(name: string, value: string, options: any) {
-              cookieStore.set({ name, value, ...options });
-            },
-            remove(name: string, options: any) {
-              cookieStore.set({ name, value: '', ...options });
-            },
-          },
-        }
-      );
-
-      // 2. Get active user session
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (user) {
-        // Save token to profile associated with the authenticated user ID
-        const { error: upsertErr } = await supabase.from('profiles').upsert({
-          id: user.id,
-          tiktok_access_token: accessToken,
-          tiktok_open_id: openId,
-          updated_at: new Date().toISOString(),
-        });
-
-        if (upsertErr) {
-          console.error("Failed to update profile token:", upsertErr);
-        }
-      } else {
-        console.warn("No active Supabase user session found during TikTok callback execution.");
-      }
-
-      return NextResponse.redirect(new URL('/dashboard', origin));
+    if (!tokenRes.ok || tokenData.error) {
+      console.error("TikTok token error:", tokenData);
+      return NextResponse.redirect(`${origin}/dashboard?error=Token+exchange+failed`);
     }
 
-    const errorDetails = tokenData.error_description || tokenData.message || 'token_exchange_failed';
-    return NextResponse.redirect(new URL(`/onboarding?error=${encodeURIComponent(errorDetails)}`, origin));
+    const accessToken = tokenData.access_token;
+    const openId = tokenData.open_id;
 
+    // 2. Initialize Supabase SSR client
+    const cookieStore = await cookies();
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll();
+          },
+          setAll(cookiesToSet) {
+            try {
+              cookiesToSet.forEach(({ name, value, options }) =>
+                cookieStore.set(name, value, options)
+              );
+            } catch {}
+          },
+        },
+      }
+    );
+
+    // 3. Get current logged-in Supabase user
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.redirect(`${origin}/login?error=Not+authenticated`);
+    }
+
+    // 4. Update the profile row with the new TikTok access token
+    const { error: dbError } = await supabase.from("profiles").upsert({
+      id: user.id,
+      tiktok_access_token: accessToken,
+      tiktok_open_id: openId,
+      updated_at: new Date().toISOString(),
+    });
+
+    if (dbError) {
+      console.error("Database save error:", dbError);
+      return NextResponse.redirect(`${origin}/dashboard?error=Failed+to+save+token`);
+    }
+
+    // Redirect back to dashboard on success
+    return NextResponse.redirect(`${origin}/dashboard`);
   } catch (err: any) {
-    return NextResponse.redirect(new URL(`/onboarding?error=${encodeURIComponent(err.message)}`, origin));
+    console.error("Callback error:", err);
+    return NextResponse.redirect(`${origin}/dashboard?error=Unexpected+error`);
   }
 }
