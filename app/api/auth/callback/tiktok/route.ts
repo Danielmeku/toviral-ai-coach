@@ -6,6 +6,7 @@ import { cookies } from "next/headers";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
+  const stateUserId = searchParams.get("state"); // User ID passed from onboarding
 
   if (!code) {
     return NextResponse.redirect(`${origin}/dashboard?error=Missing+code`);
@@ -36,7 +37,7 @@ export async function GET(request: Request) {
     const tokenData = await tokenRes.json();
 
     if (!tokenRes.ok || tokenData.error || tokenData.error_code) {
-      console.error("TikTok Token Error:", tokenData);
+      console.error("TikTok Token Exchange Error Response:", tokenData);
       return NextResponse.redirect(
         `${origin}/dashboard?error=${encodeURIComponent(
           tokenData.error_description || tokenData.error || "Token exchange failed"
@@ -51,63 +52,44 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/dashboard?error=No+access+token`);
     }
 
-    // 2. Initialize Supabase SSR client to read session cookies
-    const cookieStore = await cookies();
-    const supabaseSSR = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-          setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
-            try {
-              cookiesToSet.forEach(({ name, value, options }) =>
-                cookieStore.set(name, value, options)
-              );
-            } catch {}
-          },
-        },
-      }
-    );
+    // 2. Identify Target User ID
+    let targetUserId = stateUserId;
 
-    // 3. Try getting user from active SSR session
-    let { data: { user } } = await supabaseSSR.auth.getUser();
-
-    // 4. Fallback: If session cookie was lost during OAuth redirect, use Service Role to update database
-    if (!user && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      const supabaseAdmin = createClient(
+    if (!targetUserId) {
+      // Fallback to checking cookie session if state was omitted
+      const cookieStore = await cookies();
+      const supabaseSSR = createServerClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          cookies: {
+            getAll() { return cookieStore.getAll(); },
+            setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
+              try {
+                cookiesToSet.forEach(({ name, value, options }) =>
+                  cookieStore.set(name, value, options)
+                );
+              } catch {}
+            },
+          },
+        }
       );
-
-      // Save token to the most recently updated profile entry
-      const { data: latestProfiles } = await supabaseAdmin
-        .from("profiles")
-        .select("id")
-        .order("updated_at", { ascending: false })
-        .limit(1);
-
-      if (latestProfiles && latestProfiles.length > 0) {
-        await supabaseAdmin.from("profiles").update({
-          tiktok_access_token: accessToken,
-          tiktok_open_id: openId,
-          updated_at: new Date().toISOString(),
-        }).eq("id", latestProfiles[0].id);
-
-        return NextResponse.redirect(`${origin}/dashboard`);
-      }
+      const { data: { user } } = await supabaseSSR.auth.getUser();
+      targetUserId = user?.id || null;
     }
 
-    if (!user) {
-      // If user session is strictly required and no fallback matched
+    if (!targetUserId) {
       return NextResponse.redirect(`${origin}/login?error=Session+lost+during+redirect`);
     }
 
-    // 5. Update authenticated user's profile
-    const { error: dbError } = await supabaseSSR.from("profiles").upsert({
-      id: user.id,
+    // 3. Save directly via Supabase Admin Client using SUPABASE_SERVICE_ROLE_KEY
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    const { error: dbError } = await supabaseAdmin.from("profiles").upsert({
+      id: targetUserId,
       tiktok_access_token: accessToken,
       tiktok_open_id: openId,
       updated_at: new Date().toISOString(),
