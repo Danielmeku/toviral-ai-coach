@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     const clientSecret = (process.env.TIKTOK_CLIENT_SECRET || "").trim();
     const redirectUri = "https://toviral-ai.vercel.app/api/auth/callback/tiktok";
 
-    // 1. Exchange authorization code for TikTok access token
+    // 1. Exchange code for TikTok Access Token
     const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -35,10 +35,10 @@ export async function GET(request: Request) {
     const tokenData = await tokenRes.json();
 
     if (!tokenRes.ok || tokenData.error || tokenData.error_code) {
-      console.error("TikTok API Exchange Failure Log:", JSON.stringify(tokenData));
+      console.error("TikTok API Exchange Failure:", JSON.stringify(tokenData));
       return NextResponse.redirect(
         `${origin}/dashboard?error=${encodeURIComponent(
-          tokenData.error_description || tokenData.error || "Token+exchange+failed"
+          tokenData.error_description || tokenData.error || "Token exchange failed"
         )}`
       );
     }
@@ -47,37 +47,57 @@ export async function GET(request: Request) {
     const openId = tokenData.data?.open_id || tokenData.open_id;
 
     if (!accessToken || !stateUserId) {
-      return NextResponse.redirect(`${origin}/dashboard?error=Missing+token+or+user+id`);
+      console.error("Missing token or stateUserId. stateUserId:", stateUserId);
+      return NextResponse.redirect(`${origin}/dashboard?error=Missing+user+id`);
     }
 
-    // 2. Initialize Supabase Admin using Service Role Key (bypasses RLS policies)
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-        },
-      }
-    );
+    // 2. Initialize Supabase Admin with Service Role Key (bypasses RLS)
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 
-    // 3. Update existing profile row (or insert if missing)
-    const { error: dbError } = await supabaseAdmin
+    if (!serviceRoleKey || !supabaseUrl) {
+      console.error("Missing SUPABASE_SERVICE_ROLE_KEY or NEXT_PUBLIC_SUPABASE_URL in env");
+      return NextResponse.redirect(`${origin}/dashboard?error=Server+config+error`);
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+
+    // 3. Update the existing profile row directly
+    const { data, error: dbError } = await supabaseAdmin
       .from("profiles")
-      .upsert(
-        {
+      .update({
+        tiktok_access_token: accessToken,
+        tiktok_open_id: openId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", stateUserId)
+      .select();
+
+    if (dbError) {
+      console.error("Supabase Update Error Detailed:", JSON.stringify(dbError));
+      return NextResponse.redirect(`${origin}/dashboard?error=Database+save+failed`);
+    }
+
+    // If update affected 0 rows, fallback to insert
+    if (!data || data.length === 0) {
+      const { error: insertError } = await supabaseAdmin
+        .from("profiles")
+        .insert({
           id: stateUserId,
           tiktok_access_token: accessToken,
           tiktok_open_id: openId,
           updated_at: new Date().toISOString(),
-        },
-        { onConflict: "id" }
-      );
+        });
 
-    if (dbError) {
-      console.error("Supabase Database Save Error:", JSON.stringify(dbError));
-      return NextResponse.redirect(`${origin}/dashboard?error=Database+save+failed`);
+      if (insertError) {
+        console.error("Supabase Insert Error Detailed:", JSON.stringify(insertError));
+        return NextResponse.redirect(`${origin}/dashboard?error=Database+save+failed`);
+      }
     }
 
     return NextResponse.redirect(`${origin}/dashboard`);
