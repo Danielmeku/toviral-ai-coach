@@ -12,8 +12,8 @@ export async function GET(request: Request) {
 
   try {
     const clientKey = (
-      process.env.NEXT_PUBLIC_TIKTOK_CLIENT_KEY ||
-      process.env.TIKTOK_CLIENT_KEY ||
+      process.env.NEXT_PUBLIC_TIKTOK_CLIENT_KEY || 
+      process.env.TIKTOK_CLIENT_KEY || 
       ""
     ).trim();
     const clientSecret = (process.env.TIKTOK_CLIENT_SECRET || "").trim();
@@ -50,7 +50,7 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/dashboard?error=Missing+token+or+user+id`);
     }
 
-    // 2. Save via Supabase Admin Client (Bypasses RLS)
+    // 2. Initialize Supabase Admin using Service Role Key (bypasses RLS policies)
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -62,7 +62,7 @@ export async function GET(request: Request) {
       }
     );
 
-    // Explicit upsert with primary key conflict target
+    // 3. Update existing profile row (or insert if missing)
     const { error: dbError } = await supabaseAdmin
       .from("profiles")
       .upsert(
