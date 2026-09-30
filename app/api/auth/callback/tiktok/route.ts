@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
 
   try {
-    // 1. Exchange OAuth code with TikTok
+    // 1. Exchange OAuth code for TikTok access token
     const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
       method: "POST",
       headers: {
@@ -45,7 +45,7 @@ export async function GET(request: Request) {
 
     const { access_token, open_id } = tokenData;
 
-    // 2. Resolve User ID from Auth Session or State
+    // 2. Retrieve authenticated Supabase user session
     const cookieStore = cookies();
     const supabaseUserClient = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -59,7 +59,10 @@ export async function GET(request: Request) {
       }
     );
 
-    const { data: { user } } = await supabaseUserClient.auth.getUser();
+    const {
+      data: { user },
+    } = await supabaseUserClient.auth.getUser();
+
     const userId = user?.id || state;
 
     if (!userId) {
@@ -67,7 +70,7 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/dashboard?error=user_not_authenticated`);
     }
 
-    // 3. Initialize Admin Client with Service Role Key (Bypasses RLS)
+    // 3. Initialize Supabase Admin Client using Service Role Key
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
       console.error("Missing SUPABASE_SERVICE_ROLE_KEY environment variable.");
@@ -79,7 +82,7 @@ export async function GET(request: Request) {
       serviceRoleKey
     );
 
-    // 4. Use UPSERT instead of UPDATE to create profile row if missing
+    // 4. Save token to profiles table (only using valid schema columns: id, tiktok_access_token, tiktok_open_id)
     const { error: dbError } = await supabaseAdmin
       .from("profiles")
       .upsert(
@@ -87,7 +90,6 @@ export async function GET(request: Request) {
           id: userId,
           tiktok_access_token: access_token,
           tiktok_open_id: open_id || null,
-          updated_at: new Date().toISOString(),
         },
         { onConflict: "id" }
       );
@@ -97,7 +99,7 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/dashboard?error=db_save_failed`);
     }
 
-    // 5. Successful Authorization
+    // 5. Clean redirect back to dashboard
     return NextResponse.redirect(`${origin}/dashboard`);
   } catch (err: any) {
     console.error("TikTok OAuth Callback catch error:", err);
