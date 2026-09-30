@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import AnalyticsView from "@/components/AnalyticsView";
 import TikTokCoachChat from "@/components/AiCoachChat";
 import TermsModal from "@/components/TermsModal";
 
-export default function DashboardPage() {
+function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -38,7 +38,7 @@ export default function DashboardPage() {
         throw new Error("User not authenticated. Please log in.");
       }
 
-      // 2. Fetch the stored TikTok token from the profiles table
+      // 2. Fetch stored TikTok token from profiles table
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("tiktok_access_token, tiktok_handle")
@@ -256,5 +256,13 @@ export default function DashboardPage() {
         </button>
       </div>
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading dashboard...</div>}>
+      <DashboardContent />
+    </Suspense>
   );
 }
