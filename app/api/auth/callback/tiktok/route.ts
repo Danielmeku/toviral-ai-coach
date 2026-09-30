@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 
 export async function GET(request: Request) {
@@ -11,17 +12,15 @@ export async function GET(request: Request) {
   }
 
   try {
-    // 1. Force the exact same client key used in the frontend onboarding authorization step
     const clientKey = (
-      process.env.NEXT_PUBLIC_TIKTOK_CLIENT_KEY || 
-      process.env.TIKTOK_CLIENT_KEY || 
+      process.env.NEXT_PUBLIC_TIKTOK_CLIENT_KEY ||
+      process.env.TIKTOK_CLIENT_KEY ||
       ""
     ).trim();
-    
     const clientSecret = (process.env.TIKTOK_CLIENT_SECRET || "").trim();
     const redirectUri = "https://toviral-ai.vercel.app/api/auth/callback/tiktok";
 
-    // 2. Exchange authorization code for TikTok access token
+    // 1. Exchange authorization code for TikTok access token
     const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -37,10 +36,10 @@ export async function GET(request: Request) {
     const tokenData = await tokenRes.json();
 
     if (!tokenRes.ok || tokenData.error || tokenData.error_code) {
-      console.error("TikTok Token Exchange Error Response:", tokenData);
+      console.error("TikTok Token Error:", tokenData);
       return NextResponse.redirect(
         `${origin}/dashboard?error=${encodeURIComponent(
-          tokenData.error_description || tokenData.error || "Token+exchange+failed"
+          tokenData.error_description || tokenData.error || "Token exchange failed"
         )}`
       );
     }
@@ -52,9 +51,9 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/dashboard?error=No+access+token`);
     }
 
-    // 3. Initialize Supabase SSR client
+    // 2. Initialize Supabase SSR client to read session cookies
     const cookieStore = await cookies();
-    const supabase = createServerClient(
+    const supabaseSSR = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
@@ -73,14 +72,41 @@ export async function GET(request: Request) {
       }
     );
 
-    // 4. Get current user & update database
-    const { data: { user } } = await supabase.auth.getUser();
+    // 3. Try getting user from active SSR session
+    let { data: { user } } = await supabaseSSR.auth.getUser();
 
-    if (!user) {
-      return NextResponse.redirect(`${origin}/login?error=Not+authenticated`);
+    // 4. Fallback: If session cookie was lost during OAuth redirect, use Service Role to update database
+    if (!user && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      const supabaseAdmin = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+      );
+
+      // Save token to the most recently updated profile entry
+      const { data: latestProfiles } = await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .order("updated_at", { ascending: false })
+        .limit(1);
+
+      if (latestProfiles && latestProfiles.length > 0) {
+        await supabaseAdmin.from("profiles").update({
+          tiktok_access_token: accessToken,
+          tiktok_open_id: openId,
+          updated_at: new Date().toISOString(),
+        }).eq("id", latestProfiles[0].id);
+
+        return NextResponse.redirect(`${origin}/dashboard`);
+      }
     }
 
-    const { error: dbError } = await supabase.from("profiles").upsert({
+    if (!user) {
+      // If user session is strictly required and no fallback matched
+      return NextResponse.redirect(`${origin}/login?error=Session+lost+during+redirect`);
+    }
+
+    // 5. Update authenticated user's profile
+    const { error: dbError } = await supabaseSSR.from("profiles").upsert({
       id: user.id,
       tiktok_access_token: accessToken,
       tiktok_open_id: openId,
