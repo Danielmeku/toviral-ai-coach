@@ -11,19 +11,24 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Determine redirect URI with fallback matching onboarding page
-    const redirectUri =
-      process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URI ||
-      "https://toviral-ai.vercel.app/api/auth/callback/tiktok";
+    // 1. Force the exact same client key used in the frontend onboarding authorization step
+    const clientKey = (
+      process.env.NEXT_PUBLIC_TIKTOK_CLIENT_KEY || 
+      process.env.TIKTOK_CLIENT_KEY || 
+      ""
+    ).trim();
+    
+    const clientSecret = (process.env.TIKTOK_CLIENT_SECRET || "").trim();
+    const redirectUri = "https://toviral-ai.vercel.app/api/auth/callback/tiktok";
 
-    // 1. Exchange authorization code for TikTok access token
+    // 2. Exchange authorization code for TikTok access token
     const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_key: process.env.TIKTOK_CLIENT_KEY!,
-        client_secret: process.env.TIKTOK_CLIENT_SECRET!,
-        code,
+        client_key: clientKey,
+        client_secret: clientSecret,
+        code: code.trim(),
         grant_type: "authorization_code",
         redirect_uri: redirectUri,
       }),
@@ -31,22 +36,23 @@ export async function GET(request: Request) {
 
     const tokenData = await tokenRes.json();
 
-    // Check for errors in HTTP status or TikTok API error fields
     if (!tokenRes.ok || tokenData.error || tokenData.error_code) {
-      console.error("TikTok Token Exchange Error Response:", JSON.stringify(tokenData));
-      return NextResponse.redirect(`${origin}/dashboard?error=Token+exchange+failed`);
+      console.error("TikTok Token Exchange Error Response:", tokenData);
+      return NextResponse.redirect(
+        `${origin}/dashboard?error=${encodeURIComponent(
+          tokenData.error_description || tokenData.error || "Token+exchange+failed"
+        )}`
+      );
     }
 
-    // TikTok API v2 returns values inside the 'data' object
     const accessToken = tokenData.data?.access_token || tokenData.access_token;
     const openId = tokenData.data?.open_id || tokenData.open_id;
 
     if (!accessToken) {
-      console.error("No access_token found in TikTok response:", JSON.stringify(tokenData));
-      return NextResponse.redirect(`${origin}/dashboard?error=No+access+token+in+response`);
+      return NextResponse.redirect(`${origin}/dashboard?error=No+access+token`);
     }
 
-    // 2. Initialize Supabase SSR client
+    // 3. Initialize Supabase SSR client
     const cookieStore = await cookies();
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -67,16 +73,13 @@ export async function GET(request: Request) {
       }
     );
 
-    // 3. Get current logged-in Supabase user
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    // 4. Get current user & update database
+    const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.redirect(`${origin}/login?error=Not+authenticated`);
     }
 
-    // 4. Update the profile row with the new TikTok access token
     const { error: dbError } = await supabase.from("profiles").upsert({
       id: user.id,
       tiktok_access_token: accessToken,
@@ -89,7 +92,6 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/dashboard?error=Failed+to+save+token`);
     }
 
-    // Redirect back to dashboard on success
     return NextResponse.redirect(`${origin}/dashboard`);
   } catch (err: any) {
     console.error("Callback error:", err);
