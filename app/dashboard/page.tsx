@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import AnalyticsView from "@/components/AnalyticsView";
 import TikTokCoachChat from "@/components/AiCoachChat";
@@ -9,7 +9,6 @@ import TermsModal from "@/components/TermsModal";
 
 function DashboardContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   const [activeTab, setActiveTab] = useState<"videos" | "analytics" | "coach">("analytics");
   const [videos, setVideos] = useState<any[]>([]);
@@ -35,7 +34,7 @@ function DashboardContent() {
         throw new Error("User not authenticated. Please log in.");
       }
 
-      // Fetch stored TikTok token from profiles
+      // Fetch stored TikTok token from profiles table
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("tiktok_access_token, tiktok_handle")
@@ -71,61 +70,19 @@ function DashboardContent() {
   }, [supabase]);
 
   useEffect(() => {
-    async function syncAndInit() {
+    async function initDashboard() {
       const { data: { user } } = await supabase.auth.getUser();
 
       if (user && !user.user_metadata?.has_accepted_terms) {
         setShowTermsModal(true);
       }
 
-      const getCookie = (name: string) => {
-        const value = `; ${document.cookie}`;
-        const parts = value.split(`; ${name}=`);
-        if (parts.length === 2) return parts.pop()?.split(";").shift();
-        return null;
-      };
-
-      const syncFlag = searchParams.get("sync_tiktok");
-      const accessToken = getCookie("tt_access_token");
-      const openId = getCookie("tt_open_id");
-
-      let tokenSaved = false;
-
-      // 1. If we have a token from cookie/redirect, save it FIRST
-      if ((syncFlag || accessToken) && user) {
-        if (accessToken) {
-          // Attempt client update
-          const { error: updateErr } = await supabase
-            .from("profiles")
-            .update({
-              tiktok_access_token: accessToken,
-              tiktok_open_id: openId || null,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", user.id);
-
-          if (updateErr) {
-            console.error("Supabase client update failed, trying server endpoint:", updateErr.message);
-            // Fallback: Save via backend endpoint if RLS blocks direct client update
-            await fetch("/api/tiktok/save-token", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ access_token: accessToken, open_id: openId }),
-            });
-          }
-
-          tokenSaved = true;
-          // Clean URL params
-          router.replace("/dashboard");
-        }
-      }
-
-      // 2. Only fetch data AFTER the update completes
+      // Automatically fetch metrics when navigating to dashboard
       await fetchTikTokData();
     }
 
-    syncAndInit();
-  }, [supabase, searchParams, router, fetchTikTokData]);
+    initDashboard();
+  }, [supabase, fetchTikTokData]);
 
   const handleAcceptTerms = async () => {
     const { error } = await supabase.auth.updateUser({
