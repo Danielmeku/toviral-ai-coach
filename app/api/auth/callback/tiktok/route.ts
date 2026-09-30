@@ -1,78 +1,77 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
+import { createClient } from "@supabase/supabase-js";
 
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
+  const state = searchParams.get("state"); // state contains user_id if passed during authorization
 
   if (!code) {
-    return NextResponse.redirect(`${origin}/dashboard?error=Missing+code`);
+    return NextResponse.redirect(new URL("/dashboard?error=missing_code", request.url));
   }
 
   try {
-    const clientKey = (
-      process.env.NEXT_PUBLIC_TIKTOK_CLIENT_KEY || 
-      process.env.TIKTOK_CLIENT_KEY || 
-      ""
-    ).trim();
-    const clientSecret = (process.env.TIKTOK_CLIENT_SECRET || "").trim();
-    const redirectUri = "https://toviral-ai.vercel.app/api/auth/callback/tiktok";
-
-    // 1. Exchange code with TikTok
-    const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
+    // 1. Exchange OAuth code for access token with TikTok
+    const tokenResponse = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Cache-Control": "no-cache",
+      },
       body: new URLSearchParams({
-        client_key: clientKey,
-        client_secret: clientSecret,
-        code: code.trim(),
+        client_key: process.env.TIKTOK_CLIENT_KEY!,
+        client_secret: process.env.TIKTOK_CLIENT_SECRET!,
+        code: code,
         grant_type: "authorization_code",
-        redirect_uri: redirectUri,
+        redirect_uri: process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URI!,
       }),
     });
 
-    const tokenData = await tokenRes.json();
+    const tokenData = await tokenResponse.json();
 
-    if (!tokenRes.ok || tokenData.error || tokenData.error_code) {
-      console.error("TikTok API Token Error:", tokenData);
-      return NextResponse.redirect(
-        `${origin}/dashboard?error=${encodeURIComponent(
-          tokenData.error_description || tokenData.error || "Token exchange failed"
-        )}`
-      );
+    if (!tokenResponse.ok || !tokenData.access_token) {
+      console.error("TikTok token exchange failed:", tokenData);
+      return NextResponse.redirect(new URL("/dashboard?error=token_exchange_failed", request.url));
     }
 
-    const accessToken = tokenData.data?.access_token || tokenData.access_token;
-    const openId = tokenData.data?.open_id || tokenData.open_id;
+    const { access_token, open_id } = tokenData;
 
-    if (!accessToken) {
-      return NextResponse.redirect(`${origin}/dashboard?error=No+token+returned`);
+    // 2. Initialize Supabase Admin Client using Service Role Key (bypasses RLS)
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+
+    // 3. Get the authenticated user ID from session/cookie or state parameter
+    // If you pass user.id in the OAuth state parameter:
+    let userId = state;
+
+    if (!userId) {
+      // Alternatively, resolve user from the Supabase auth cookie directly on the server
+      const { data: { user } } = await supabaseAdmin.auth.getUser();
+      userId = user?.id || null;
     }
 
-    // 2. Save tokens in HTTP-Only secure cookies
-    const cookieStore = await cookies();
-    cookieStore.set("tt_access_token", accessToken, {
-      httpOnly: false, // allow client-side sync
-      secure: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-    });
+    if (userId) {
+      // 4. Directly update the profile table in Supabase on the server
+      const { error: dbError } = await supabaseAdmin
+        .from("profiles")
+        .update({
+          tiktok_access_token: access_token,
+          tiktok_open_id: open_id || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", userId);
 
-    if (openId) {
-      cookieStore.set("tt_open_id", openId, {
-        httpOnly: false,
-        secure: true,
-        sameSite: "lax",
-        path: "/",
-        maxAge: 60 * 60 * 24 * 7,
-      });
+      if (dbError) {
+        console.error("Failed to update profile in database:", dbError.message);
+      }
     }
 
-    // 3. Redirect to dashboard with sync trigger flag
-    return NextResponse.redirect(`${origin}/dashboard?sync_tiktok=true`);
+    // 5. Clean redirect back to dashboard
+    return NextResponse.redirect(new URL("/dashboard", request.url));
   } catch (err: any) {
-    console.error("Callback exception:", err);
-    return NextResponse.redirect(`${origin}/dashboard?error=Unexpected+error`);
+    console.error("Callback handler error:", err);
+    return NextResponse.redirect(new URL("/dashboard?error=server_error", request.url));
   }
 }
