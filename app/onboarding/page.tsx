@@ -21,29 +21,36 @@ export default function OnboardingPage() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
 
-      // 1. Save onboarding profile details to Supabase if logged in
-      if (user) {
-        const { error: profileError } = await supabase.from('profiles').upsert({
-          id: user.id,
-          full_name: fullName,
-          tiktok_handle: handle.replace(/^@/, '').trim(),
-          niche: niche,
-        })
-
-        if (profileError) {
-          console.warn("Profile save warning:", profileError.message)
-        }
+      if (!user) {
+        alert("Please log in before connecting TikTok.")
+        setLoading(false)
+        return
       }
 
-      // 2. Direct browser redirect to official TikTok OAuth Endpoint
-      const clientKey = process.env.NEXT_PUBLIC_TIKTOK_CLIENT_KEY || process.env.TIKTOK_CLIENT_KEY
+      // 1. Save onboarding profile details to Supabase
+      const { error: profileError } = await supabase.from('profiles').upsert({
+        id: user.id,
+        full_name: fullName,
+        tiktok_handle: handle.replace(/^@/, '').trim(),
+        niche: niche,
+      })
+
+      if (profileError) {
+        console.warn("Profile save warning:", profileError.message)
+      }
+
+      // 2. Pass user.id in state so callback works even if cookies are dropped by browser cross-site policies
+      const clientKey = (
+        process.env.NEXT_PUBLIC_TIKTOK_CLIENT_KEY || 
+        process.env.TIKTOK_CLIENT_KEY || 
+        ""
+      ).trim()
       const redirectUri = encodeURIComponent("https://toviral-ai.vercel.app/api/auth/callback/tiktok")
       const scope = encodeURIComponent("user.info.basic,video.list")
-      const csrfState = Math.random().toString(36).substring(2, 15)
+      const state = encodeURIComponent(user.id)
 
-      const tiktokAuthUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${clientKey}&response_type=code&scope=${scope}&redirect_uri=${redirectUri}&state=${csrfState}`
+      const tiktokAuthUrl = `https://www.tiktok.com/v2/auth/authorize/?client_key=${clientKey}&response_type=code&scope=${scope}&redirect_uri=${redirectUri}&state=${state}`
 
-      // Trigger full browser navigation to TikTok
       window.location.href = tiktokAuthUrl
     } catch (err: any) {
       alert(`Unexpected error: ${err.message}`)
