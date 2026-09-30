@@ -11,6 +11,11 @@ export async function GET(request: Request) {
   }
 
   try {
+    // Determine redirect URI with fallback matching onboarding page
+    const redirectUri =
+      process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URI ||
+      "https://toviral-ai.vercel.app/api/auth/callback/tiktok";
+
     // 1. Exchange authorization code for TikTok access token
     const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
       method: "POST",
@@ -20,19 +25,26 @@ export async function GET(request: Request) {
         client_secret: process.env.TIKTOK_CLIENT_SECRET!,
         code,
         grant_type: "authorization_code",
-        redirect_uri: process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URI!,
+        redirect_uri: redirectUri,
       }),
     });
 
     const tokenData = await tokenRes.json();
 
-    if (!tokenRes.ok || tokenData.error) {
-      console.error("TikTok token error:", tokenData);
+    // Check for errors in HTTP status or TikTok API error fields
+    if (!tokenRes.ok || tokenData.error || tokenData.error_code) {
+      console.error("TikTok Token Exchange Error Response:", JSON.stringify(tokenData));
       return NextResponse.redirect(`${origin}/dashboard?error=Token+exchange+failed`);
     }
 
-    const accessToken = tokenData.access_token;
-    const openId = tokenData.open_id;
+    // TikTok API v2 returns values inside the 'data' object
+    const accessToken = tokenData.data?.access_token || tokenData.access_token;
+    const openId = tokenData.data?.open_id || tokenData.open_id;
+
+    if (!accessToken) {
+      console.error("No access_token found in TikTok response:", JSON.stringify(tokenData));
+      return NextResponse.redirect(`${origin}/dashboard?error=No+access+token+in+response`);
+    }
 
     // 2. Initialize Supabase SSR client
     const cookieStore = await cookies();
@@ -56,7 +68,9 @@ export async function GET(request: Request) {
     );
 
     // 3. Get current logged-in Supabase user
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.redirect(`${origin}/login?error=Not+authenticated`);
