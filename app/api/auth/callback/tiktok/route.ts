@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const stateUserId = searchParams.get("state"); // User ID passed from onboarding
+  const stateUserId = searchParams.get("state");
 
   if (!code) {
     return NextResponse.redirect(`${origin}/dashboard?error=Missing+code`);
@@ -37,10 +35,10 @@ export async function GET(request: Request) {
     const tokenData = await tokenRes.json();
 
     if (!tokenRes.ok || tokenData.error || tokenData.error_code) {
-      console.error("TikTok Token Exchange Error Response:", tokenData);
+      console.error("TikTok API Exchange Failure Log:", JSON.stringify(tokenData));
       return NextResponse.redirect(
         `${origin}/dashboard?error=${encodeURIComponent(
-          tokenData.error_description || tokenData.error || "Token exchange failed"
+          tokenData.error_description || tokenData.error || "Token+exchange+failed"
         )}`
       );
     }
@@ -48,61 +46,43 @@ export async function GET(request: Request) {
     const accessToken = tokenData.data?.access_token || tokenData.access_token;
     const openId = tokenData.data?.open_id || tokenData.open_id;
 
-    if (!accessToken) {
-      return NextResponse.redirect(`${origin}/dashboard?error=No+access+token`);
+    if (!accessToken || !stateUserId) {
+      return NextResponse.redirect(`${origin}/dashboard?error=Missing+token+or+user+id`);
     }
 
-    // 2. Identify Target User ID
-    let targetUserId = stateUserId;
-
-    if (!targetUserId) {
-      // Fallback to checking cookie session if state was omitted
-      const cookieStore = await cookies();
-      const supabaseSSR = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            getAll() { return cookieStore.getAll(); },
-            setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
-              try {
-                cookiesToSet.forEach(({ name, value, options }) =>
-                  cookieStore.set(name, value, options)
-                );
-              } catch {}
-            },
-          },
-        }
-      );
-      const { data: { user } } = await supabaseSSR.auth.getUser();
-      targetUserId = user?.id || null;
-    }
-
-    if (!targetUserId) {
-      return NextResponse.redirect(`${origin}/login?error=Session+lost+during+redirect`);
-    }
-
-    // 3. Save directly via Supabase Admin Client using SUPABASE_SERVICE_ROLE_KEY
+    // 2. Save via Supabase Admin Client (Bypasses RLS)
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      }
     );
 
-    const { error: dbError } = await supabaseAdmin.from("profiles").upsert({
-      id: targetUserId,
-      tiktok_access_token: accessToken,
-      tiktok_open_id: openId,
-      updated_at: new Date().toISOString(),
-    });
+    // Explicit upsert with primary key conflict target
+    const { error: dbError } = await supabaseAdmin
+      .from("profiles")
+      .upsert(
+        {
+          id: stateUserId,
+          tiktok_access_token: accessToken,
+          tiktok_open_id: openId,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      );
 
     if (dbError) {
-      console.error("Database save error:", dbError);
-      return NextResponse.redirect(`${origin}/dashboard?error=Failed+to+save+token`);
+      console.error("Supabase Database Save Error:", JSON.stringify(dbError));
+      return NextResponse.redirect(`${origin}/dashboard?error=Database+save+failed`);
     }
 
     return NextResponse.redirect(`${origin}/dashboard`);
   } catch (err: any) {
-    console.error("Callback error:", err);
+    console.error("Callback exception:", err);
     return NextResponse.redirect(`${origin}/dashboard?error=Unexpected+error`);
   }
 }
