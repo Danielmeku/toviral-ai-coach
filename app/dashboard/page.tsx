@@ -24,21 +24,18 @@ function DashboardContent() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  const fetchTikTokData = useCallback(async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-
+  const fetchTikTokData = useCallback(async () => {
     setLoading(true);
     setError("");
 
     try {
-      // 1. Get authenticated user
       const { data: { user } } = await supabase.auth.getUser();
 
       if (!user) {
         throw new Error("User not authenticated. Please log in.");
       }
 
-      // 2. Fetch stored TikTok token from profiles table
+      // Fetch stored TikTok token from profiles
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("tiktok_access_token, tiktok_handle")
@@ -53,7 +50,6 @@ function DashboardContent() {
         setHandle(profile.tiktok_handle);
       }
 
-      // 3. Request metrics using stored access token
       const res = await fetch("/api/tiktok/fetch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -74,17 +70,14 @@ function DashboardContent() {
     }
   }, [supabase]);
 
-  // Sync TikTok cookie token to Supabase profile directly from browser session
   useEffect(() => {
     async function syncAndInit() {
       const { data: { user } } = await supabase.auth.getUser();
 
-      // Terms modal check
       if (user && !user.user_metadata?.has_accepted_terms) {
         setShowTermsModal(true);
       }
 
-      // Read cookie helper
       const getCookie = (name: string) => {
         const value = `; ${document.cookie}`;
         const parts = value.split(`; ${name}=`);
@@ -96,9 +89,12 @@ function DashboardContent() {
       const accessToken = getCookie("tt_access_token");
       const openId = getCookie("tt_open_id");
 
-      // If redirected from TikTok callback with token cookie
+      let tokenSaved = false;
+
+      // 1. If we have a token from cookie/redirect, save it FIRST
       if ((syncFlag || accessToken) && user) {
         if (accessToken) {
+          // Attempt client update
           const { error: updateErr } = await supabase
             .from("profiles")
             .update({
@@ -109,16 +105,23 @@ function DashboardContent() {
             .eq("id", user.id);
 
           if (updateErr) {
-            console.error("Failed to sync TikTok token to Supabase:", updateErr.message);
-          } else {
-            // Clear URL query parameters after sync
-            router.replace("/dashboard");
+            console.error("Supabase client update failed, trying server endpoint:", updateErr.message);
+            // Fallback: Save via backend endpoint if RLS blocks direct client update
+            await fetch("/api/tiktok/save-token", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ access_token: accessToken, open_id: openId }),
+            });
           }
+
+          tokenSaved = true;
+          // Clean URL params
+          router.replace("/dashboard");
         }
       }
 
-      // Load metrics for account
-      fetchTikTokData();
+      // 2. Only fetch data AFTER the update completes
+      await fetchTikTokData();
     }
 
     syncAndInit();
@@ -167,10 +170,8 @@ function DashboardContent() {
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
-      {/* First-Time User Terms Modal */}
       {showTermsModal && <TermsModal onAccept={handleAcceptTerms} />}
 
-      {/* Fetch Control */}
       <div className="flex items-center justify-between max-w-md">
         <button
           type="button"
@@ -184,7 +185,6 @@ function DashboardContent() {
 
       {error && <p className="text-red-500 text-sm">{error}</p>}
 
-      {/* Tab Navigation Buttons */}
       <div className="flex border-b border-gray-200 dark:border-gray-800 gap-4">
         <button
           onClick={() => setActiveTab("analytics")}
@@ -218,7 +218,6 @@ function DashboardContent() {
         </button>
       </div>
 
-      {/* Dynamic Tab Content */}
       {activeTab === "analytics" ? (
         <AnalyticsView videos={videos} />
       ) : activeTab === "videos" ? (
@@ -241,7 +240,6 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* Danger Zone: Account & Data Deletion */}
       <div className="mt-12 pt-6 border-t border-red-500/20 bg-red-950/10 rounded-xl p-5 space-y-3">
         <h3 className="text-base font-bold text-red-500">Please Read First!</h3>
         <p className="text-xs text-gray-400 leading-relaxed">
