@@ -12,16 +12,15 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/dashboard?error=missing_code`);
   }
 
-  // Ensure redirect URI matches exact environment setup
   const redirectUri =
     process.env.NEXT_PUBLIC_TIKTOK_REDIRECT_URI ||
-    `${origin}/api/tiktok/callback`;
+    `${origin}/api/auth/callback/tiktok`;
 
   const clientKey = process.env.TIKTOK_CLIENT_KEY || process.env.TIKTOK_CLIENT_ID;
   const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
 
   try {
-    // 1. Exchange OAuth code with TikTok API v2
+    // 1. Exchange OAuth code with TikTok
     const tokenRes = await fetch("https://open.tiktokapis.com/v2/oauth/token/", {
       method: "POST",
       headers: {
@@ -39,21 +38,14 @@ export async function GET(request: Request) {
 
     const tokenData = await tokenRes.json();
 
-    // Debugging details if exchange fails
     if (!tokenRes.ok || !tokenData.access_token) {
-      console.error("TikTok OAuth Token Error details:", {
-        status: tokenRes.status,
-        data: tokenData,
-        sentRedirectUri: redirectUri,
-        clientKeyPresent: !!clientKey,
-        clientSecretPresent: !!clientSecret,
-      });
+      console.error("TikTok OAuth Token Error:", tokenData);
       return NextResponse.redirect(`${origin}/dashboard?error=token_exchange_failed`);
     }
 
     const { access_token, open_id } = tokenData;
 
-    // 2. Identify the active logged-in user session
+    // 2. Resolve User ID from Auth Session or State
     const cookieStore = cookies();
     const supabaseUserClient = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -75,27 +67,37 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/dashboard?error=user_not_authenticated`);
     }
 
-    // 3. Save access token directly using Admin Service Role (bypassing RLS restrictions)
+    // 3. Initialize Admin Client with Service Role Key (Bypasses RLS)
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceRoleKey) {
+      console.error("Missing SUPABASE_SERVICE_ROLE_KEY environment variable.");
+      return NextResponse.redirect(`${origin}/dashboard?error=missing_service_key`);
+    }
+
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      serviceRoleKey
     );
 
+    // 4. Use UPSERT instead of UPDATE to create profile row if missing
     const { error: dbError } = await supabaseAdmin
       .from("profiles")
-      .update({
-        tiktok_access_token: access_token,
-        tiktok_open_id: open_id || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", userId);
+      .upsert(
+        {
+          id: userId,
+          tiktok_access_token: access_token,
+          tiktok_open_id: open_id || null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      );
 
     if (dbError) {
-      console.error("Failed to update profile in database:", dbError.message);
+      console.error("Database upsert failed:", dbError.message);
       return NextResponse.redirect(`${origin}/dashboard?error=db_save_failed`);
     }
 
-    // 4. Success redirect
+    // 5. Successful Authorization
     return NextResponse.redirect(`${origin}/dashboard`);
   } catch (err: any) {
     console.error("TikTok OAuth Callback catch error:", err);
