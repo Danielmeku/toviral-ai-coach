@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import AnalyticsView from "@/components/AnalyticsView";
 import TikTokCoachChat from "@/components/AiCoachChat";
@@ -9,6 +9,8 @@ import TermsModal from "@/components/TermsModal";
 
 export default function DashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [activeTab, setActiveTab] = useState<"videos" | "analytics" | "coach">("analytics");
   const [videos, setVideos] = useState<any[]>([]);
   const [handle, setHandle] = useState("");
@@ -72,17 +74,55 @@ export default function DashboardPage() {
     }
   }, [supabase]);
 
+  // Sync TikTok cookie token to Supabase profile directly from browser session
   useEffect(() => {
-    async function checkTermsAndFetch() {
+    async function syncAndInit() {
       const { data: { user } } = await supabase.auth.getUser();
+
+      // Terms modal check
       if (user && !user.user_metadata?.has_accepted_terms) {
         setShowTermsModal(true);
       }
+
+      // Read cookie helper
+      const getCookie = (name: string) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop()?.split(";").shift();
+        return null;
+      };
+
+      const syncFlag = searchParams.get("sync_tiktok");
+      const accessToken = getCookie("tt_access_token");
+      const openId = getCookie("tt_open_id");
+
+      // If redirected from TikTok callback with token cookie
+      if ((syncFlag || accessToken) && user) {
+        if (accessToken) {
+          const { error: updateErr } = await supabase
+            .from("profiles")
+            .update({
+              tiktok_access_token: accessToken,
+              tiktok_open_id: openId || null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", user.id);
+
+          if (updateErr) {
+            console.error("Failed to sync TikTok token to Supabase:", updateErr.message);
+          } else {
+            // Clear URL query parameters after sync
+            router.replace("/dashboard");
+          }
+        }
+      }
+
       // Load metrics for account
       fetchTikTokData();
     }
-    checkTermsAndFetch();
-  }, [supabase, fetchTikTokData]);
+
+    syncAndInit();
+  }, [supabase, searchParams, router, fetchTikTokData]);
 
   const handleAcceptTerms = async () => {
     const { error } = await supabase.auth.updateUser({
