@@ -43,7 +43,10 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${origin}/dashboard?error=token_exchange_failed`);
     }
 
-    const { access_token, open_id } = tokenData;
+    const { access_token, refresh_token, expires_in, open_id } = tokenData;
+
+    // Calculate expiration timestamp (current unix time + expires_in seconds)
+    const tokenExpiresAt = Math.floor(Date.now() / 1000) + (expires_in || 86400);
 
     // 2. Retrieve authenticated Supabase user session
     const cookieStore = cookies();
@@ -82,13 +85,15 @@ export async function GET(request: Request) {
       serviceRoleKey
     );
 
-    // 4. Save token to profiles table (only using valid schema columns: id, tiktok_access_token, tiktok_open_id)
+    // 4. Save tokens, refresh token, expiration timestamp, and open_id to profiles table
     const { error: dbError } = await supabaseAdmin
       .from("profiles")
       .upsert(
         {
           id: userId,
           tiktok_access_token: access_token,
+          tiktok_refresh_token: refresh_token || null,
+          tiktok_token_expires_at: tokenExpiresAt,
           tiktok_open_id: open_id || null,
         },
         { onConflict: "id" }
